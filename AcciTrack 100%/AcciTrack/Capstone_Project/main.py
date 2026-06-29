@@ -12,7 +12,6 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from db_tables import officer_columns, task_columns, report_columns
-from flask_cloudflared import run_with_cloudflared
 
 separator_string = "[sprtr_str]"
 ALLOWED_EXTENSIONS = {"mp4", "pdf", "doc", "docx", "png", "jpg", "jpeg"}
@@ -25,7 +24,6 @@ app.config["SESSION_COOKIE_SAMESITE"] = "None"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = 512 * 1024 * 1024  # Limit: 512MB
-run_with_cloudflared(app)
 db = EasySQL()
 
 # Global set to track active user badge numbers
@@ -702,7 +700,6 @@ def add_report():
         ]
         db.insert_to_table("AcciTrack", "AcciTrack_ReportList", values)
 
-        # Audit Log: Client Submits Report
         badge = session.get("badge_number", "-1")
         log_security_event(badge, "Report Submitted",
                            f"Client/Officer (Badge: {badge}, Name: {officer}) successfully submitted a new incident report. Case Ref: {case_num}, Accident Type: {accident_type}, Location: {location}")
@@ -732,7 +729,6 @@ def mark_report_read():
         conn = sqlite3.connect("AcciTrack.db")
         cursor = conn.cursor()
 
-        # Check if the active session is an Admin
         cursor.execute("SELECT officer_is_admin FROM AcciTrack_OfficerList WHERE officer_badge_number = ?", (badge,))
         user_row = cursor.fetchone()
         is_admin = user_row and user_row[0] == "yes"
@@ -772,7 +768,6 @@ def update_report_status():
         note = request.args.get("note", "")
         review_time = datetime.datetime.now().strftime("%b %d %Y • %I:%M %p")
 
-        # Dynamically query the database to find the logged-in admin's actual preferred name
         badge = session.get("badge_number", "-1")
         conn = sqlite3.connect("AcciTrack.db")
         cursor = conn.cursor()
@@ -796,7 +791,6 @@ def update_report_status():
         conn.commit()
         conn.close()
 
-        # System Log
         log_security_event(badge, f"Report {status.title()}",
                            f"Admin {reviewer} changed report {case_num} status to {status.upper()}. Reason: {note}")
 
@@ -817,12 +811,11 @@ def create_user():
         badge = request.args.get("badge", "").replace("#", "").strip()
         phone = request.args.get("phone", "")
         email = request.args.get("email", "")
-        role = request.args.get("role", "no")  # "yes" for admin, "no" for officer
+        role = request.args.get("role", "no")
         pin = request.args.get("pin", "1234")
         username = request.args.get("username", "")
 
         employee_id = f"EMP-{datetime.datetime.now().year}-{badge}"
-        start_date = datetime.datetime.now().strftime("%m/%d/%Y")
 
         conn = sqlite3.connect("AcciTrack.db")
         cursor = conn.cursor()
@@ -873,10 +866,8 @@ def create_user():
 
         db.insert_to_table("AcciTrack", "AcciTrack_OfficerList", values)
 
-        # Generate a unique, one-time set of backup codes for the new user
         unique_codes = generate_unique_backup_codes()
 
-        # Initialize onboarding status explicitly as 'New' (2FA disabled by default)
         cursor.execute("""
             INSERT OR REPLACE INTO AcciTrack_SecuritySettings 
             (badge_number, tfa_enabled, login_notifications, activity_logs_enabled, backup_codes, account_status)
@@ -886,7 +877,6 @@ def create_user():
         conn.commit()
         conn.close()
 
-        # Audit Log: A New Account Was Created
         admin_badge = session.get("badge_number", "System")
         role_desc = "Administrator" if role == "yes" else "Officer / Employee"
         log_security_event(admin_badge, "Account Created",
@@ -906,7 +896,6 @@ def delete_user():
 
         admin_badge = session.get("badge_number")
 
-        # Verify that current logged-in user possesses valid administrator rights
         conn = sqlite3.connect("AcciTrack.db")
         cursor = conn.cursor()
         cursor.execute("SELECT officer_is_admin FROM AcciTrack_OfficerList WHERE officer_badge_number = ?",
@@ -918,7 +907,7 @@ def delete_user():
             return "Unauthorized: Admin privileges required"
 
         target_badge = request.args.get("badge")
-        action = request.args.get("action")  # "deactivate" or "permanent"
+        action = request.args.get("action")
 
         if not target_badge or not action:
             conn.close()
@@ -935,7 +924,6 @@ def delete_user():
         target_name = f"{target_user[0]} {target_user[1]}" if target_user else f"Badge {target_badge}"
 
         if action == "deactivate":
-            # Set target badge account_status in SecuritySettings to block system access
             cursor.execute("SELECT 1 FROM AcciTrack_SecuritySettings WHERE badge_number = ?", (target_badge,))
             if not cursor.fetchone():
                 cursor.execute("""
@@ -947,17 +935,14 @@ def delete_user():
                     "UPDATE AcciTrack_SecuritySettings SET account_status = 'Inactive' WHERE badge_number = ?",
                     (target_badge,))
 
-            # Log audit event under the active administrator's security logs
             log_security_event(admin_badge, "Account Deactivated",
                                f"Admin {admin_badge} deactivated user {target_name} (Badge: {target_badge}). Access restricted.")
 
         elif action == "permanent":
-            # Completely purge record from primary database registries
             cursor.execute("DELETE FROM AcciTrack_OfficerList WHERE officer_badge_number = ?", (target_badge,))
             cursor.execute("DELETE FROM AcciTrack_SecuritySettings WHERE badge_number = ?", (target_badge,))
             cursor.execute("DELETE FROM AcciTrack_AccessHistory WHERE badge_number = ?", (target_badge,))
 
-            # Log audit event under the active administrator's security logs
             log_security_event(admin_badge, "Account Purged",
                                f"Admin {admin_badge} permanently deleted user {target_name} (Badge: {target_badge}) database records.")
 
@@ -987,7 +972,6 @@ def add_certification():
             file = request.files['file']
             if file and file.filename != '':
                 filename = secure_filename(file.filename)
-                # Avoid collisions by adding timestamp prefix
                 filename = f"cert_{badge}_{int(datetime.datetime.now().timestamp())}_{filename}"
                 file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
                 filePath = f"/upload/{filename}"
@@ -1027,15 +1011,14 @@ def get_certifications():
 
         cert_list = []
         for c in certs:
-            get_cert = {
+            cert_list.append({
                 "id": c[0],
                 "cert_name": c[1],
                 "issuing_org": c[2],
                 "issued_date": c[3],
                 "expiry_date": c[4],
                 "file_path": c[5]
-            }
-            cert_list.append(get_cert)
+            })
         return jsonify(cert_list)
     except Exception as e:
         print("Error fetching certifications:", e)
@@ -1056,7 +1039,6 @@ def delete_certification():
         conn = sqlite3.connect("AcciTrack.db")
         cursor = conn.cursor()
 
-        # Verify target certification ownership and acquire file path for disk removal
         cursor.execute("SELECT cert_name, file_path FROM AcciTrack_Certifications WHERE id = ? AND badge_number = ?",
                        (cert_id, badge))
         row = cursor.fetchone()
@@ -1067,7 +1049,6 @@ def delete_certification():
 
         current_file_path = row[1]
         if current_file_path and current_file_path != "none":
-            # Attempt to safely unlink physical file from the active storage directory upon record removal
             try:
                 relative_path = current_file_path.replace("/upload/", "")
                 physical_disk_path = os.path.join(app.config['UPLOAD_FOLDER'], relative_path)
@@ -1128,12 +1109,10 @@ def update_profile():
         conn = sqlite3.connect("AcciTrack.db")
         cursor = conn.cursor()
 
-        # Check if the requesting user has administrator privileges
         cursor.execute("SELECT officer_is_admin FROM AcciTrack_OfficerList WHERE officer_badge_number = ?", (badge,))
         user_row = cursor.fetchone()
         is_admin = user_row[0] == "yes" if user_row else False
 
-        # Determine structural details configuration
         change_type = request.args.get("change_type") or request.form.get("change_type") or "Contact"
 
         requested_data = {}
@@ -1192,15 +1171,12 @@ def update_profile():
                     WHERE officer_badge_number = ?
                 """, (requested_data.get("email"), requested_data.get("sec_email"), requested_data.get("work_phone"),
                       requested_data.get("mobile_phone"), requested_data.get("emerg_name"),
-                      requested_data.get("emerg_phone"),
-                      requested_data.get("emerg_rel"), requested_data.get("emerg_name2"),
-                      requested_data.get("emerg_phone2"),
-                      requested_data.get("emerg_rel2"),
-                      badge))
+                      requested_data.get("emerg_phone"), requested_data.get("emerg_rel"),
+                      requested_data.get("emerg_name2"), requested_data.get("emerg_phone2"),
+                      requested_data.get("emerg_rel2"), badge))
             conn.commit()
             conn.close()
 
-            # Audit Log: Admin Directly Changes Profile Info
             log_security_event(badge, "Profile Updated",
                                f"Admin (Badge: {badge}) directly updated their own profile configurations of type: {change_type}.")
             return "Success"
@@ -1213,7 +1189,6 @@ def update_profile():
             conn.commit()
             conn.close()
 
-            # Audit Log: Client Proposes Change in Personal Information
             log_security_event(badge, "Profile Change Proposed",
                                f"Client/Officer (Badge: {badge}) submitted a proposed profile change request of type {change_type} for Admin review.")
             return "Pending"
@@ -1222,7 +1197,6 @@ def update_profile():
         return "Fail"
 
 
-# --- ADMIN PROFILE DATABASE PERSISTENCE ---
 @app.route('/update-personal-details', methods=["POST"])
 def update_personal_details():
     try:
@@ -1237,14 +1211,14 @@ def update_personal_details():
         gender = request.args.get("gender") or request.form.get("gender") or ""
         nationality = request.args.get("nationality") or request.form.get("nationality") or ""
 
-        url = f"UPDATE AcciTrack_OfficerList SET officer_first_name = ?, officer_middle_name = ?, officer_last_name = ?, officer_birthday = ?, officer_gender = ?, officer_nationality = ? WHERE officer_badge_number = ?"
         conn = sqlite3.connect("AcciTrack.db")
         cursor = conn.cursor()
-        cursor.execute(url, (first_name, middle_name, last_name, birthday, gender, nationality, badge))
+        cursor.execute(
+            "UPDATE AcciTrack_OfficerList SET officer_first_name = ?, officer_middle_name = ?, officer_last_name = ?, officer_birthday = ?, officer_gender = ?, officer_nationality = ? WHERE officer_badge_number = ?",
+            (first_name, middle_name, last_name, birthday, gender, nationality, badge))
         conn.commit()
         conn.close()
 
-        # Audit Log: Admin Changes Personal Information
         log_security_event(badge, "Profile Updated",
                            f"Admin (Badge: {badge}) updated their own personal details. Name: {first_name} {last_name}, Gender: {gender}")
         return "Success"
@@ -1265,14 +1239,14 @@ def update_contact_details():
         work_phone = request.args.get("work_phone") or request.form.get("work_phone") or ""
         mobile_phone = request.args.get("mobile_phone") or request.form.get("mobile_phone") or ""
 
-        url = f"UPDATE AcciTrack_OfficerList SET officer_primary_email = ?, officer_secondary_email = ?, officer_work_phone = ?, officer_mobile_phone = ? WHERE officer_badge_number = ?"
         conn = sqlite3.connect("AcciTrack.db")
         cursor = conn.cursor()
-        cursor.execute(url, (email, sec_email, work_phone, mobile_phone, badge))
+        cursor.execute(
+            "UPDATE AcciTrack_OfficerList SET officer_primary_email = ?, officer_secondary_email = ?, officer_work_phone = ?, officer_mobile_phone = ? WHERE officer_badge_number = ?",
+            (email, sec_email, work_phone, mobile_phone, badge))
         conn.commit()
         conn.close()
 
-        # Audit Log: Admin Changes Contact Details
         log_security_event(badge, "Profile Updated",
                            f"Admin (Badge: {badge}) updated their own contact configurations. Primary Email: {email}, Mobile Phone: {mobile_phone}")
         return "Success"
@@ -1295,21 +1269,18 @@ def update_emergency_details():
         emerg_rel2 = request.args.get("emerg_rel2") or request.form.get("emerg_rel2") or ""
         emerg_phone2 = request.args.get("emerg_phone2") or request.form.get("emerg_phone2") or ""
 
-        url = """UPDATE AcciTrack_OfficerList 
-                 SET officer_primary_contact_name = ?, 
-                     officer_primary_contact_relationship = ?, 
-                     officer_primary_contact_phone_number = ?, 
-                     officer_secondary_contact_name = ?, 
-                     officer_secondary_contact_relationship = ?, 
-                     officer_secondary_contact_phone_number = ? 
-                 WHERE officer_badge_number = ?"""
         conn = sqlite3.connect("AcciTrack.db")
         cursor = conn.cursor()
-        cursor.execute(url, (emerg_name, emerg_rel, emerg_phone, emerg_name2, emerg_rel2, emerg_phone2, badge))
+        cursor.execute("""
+            UPDATE AcciTrack_OfficerList 
+            SET officer_primary_contact_name = ?, officer_primary_contact_relationship = ?, 
+                officer_primary_contact_phone_number = ?, officer_secondary_contact_name = ?, 
+                officer_secondary_contact_relationship = ?, officer_secondary_contact_phone_number = ? 
+            WHERE officer_badge_number = ?""",
+            (emerg_name, emerg_rel, emerg_phone, emerg_name2, emerg_rel2, emerg_phone2, badge))
         conn.commit()
         conn.close()
 
-        # Audit Log: Admin Changes Emergency Details
         log_security_event(badge, "Profile Updated",
                            f"Admin (Badge: {badge}) updated their own emergency contacts. Primary: {emerg_name} ({emerg_rel}) - {emerg_phone}")
         return "Success"
@@ -1333,22 +1304,19 @@ def update_employment_details():
         location = request.args.get("location") or request.form.get("location") or ""
         schedule = request.args.get("schedule") or request.form.get("schedule") or ""
 
-        url = """UPDATE AcciTrack_OfficerList 
-                 SET officer_employment_job_title = ?, 
-                     officer_employment_department = ?, 
-                     officer_employment_type = ?, 
-                     officer_employment_start_date = ?, 
-                     officer_employment_reporting_officer = ?, 
-                     officer_employment_work_location = ?,
-                     officer_employment_history = ?
-                 WHERE officer_badge_number = ?"""
         conn = sqlite3.connect("AcciTrack.db")
         cursor = conn.cursor()
-        cursor.execute(url, (job_title, department, emp_type, start_date, supervisor, location, schedule, badge))
+        cursor.execute("""
+            UPDATE AcciTrack_OfficerList 
+            SET officer_employment_job_title = ?, officer_employment_department = ?, 
+                officer_employment_type = ?, officer_employment_start_date = ?, 
+                officer_employment_reporting_officer = ?, officer_employment_work_location = ?,
+                officer_employment_history = ?
+            WHERE officer_badge_number = ?""",
+            (job_title, department, emp_type, start_date, supervisor, location, schedule, badge))
         conn.commit()
         conn.close()
 
-        # Audit Log: Admin Changes Employment Details
         log_security_event(badge, "Profile Updated",
                            f"Admin (Badge: {badge}) updated their own employment/deployment details. Job Title: {job_title}, Dept: {department}, Location: {location}")
         return "Success"
@@ -1372,7 +1340,6 @@ def upload_document():
             return "Empty filename"
 
         filename = secure_filename(file.filename)
-        # Avoid document filename collision across user records
         filename = f"doc_{badge}_{int(datetime.datetime.now().timestamp())}_{filename}"
         file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
 
@@ -1383,7 +1350,6 @@ def upload_document():
         row = cursor.fetchone()
         current_docs = row[0] if row and row[0] else ""
 
-        # Remove comma from date string to avoid dynamic parsing split error
         display_name = request.form.get("display_name") or filename
         new_doc_entry = f"{filename}|{datetime.datetime.now().strftime('%b %d %Y')}|{display_name}"
         updated_docs = (current_docs + "," + new_doc_entry) if current_docs else new_doc_entry
@@ -1393,7 +1359,6 @@ def upload_document():
         conn.commit()
         conn.close()
 
-        # Audit Log: Client or Admin uploads personal information document
         log_security_event(badge, "Document Uploaded",
                            f"User (Badge: {badge}) uploaded personal information document: {display_name} (File: {filename})")
 
@@ -1424,7 +1389,6 @@ def delete_document():
             conn.close()
             return "No documents found"
 
-        # Filter out the deleted file from the list
         docs = current_docs.split(",")
         updated_docs_list = []
         deleted_file = None
@@ -1442,7 +1406,6 @@ def delete_document():
         conn.commit()
         conn.close()
 
-        # Delete physical document file from disk
         if deleted_file:
             disk_path = os.path.join(app.config['UPLOAD_FOLDER'], deleted_file)
             if os.path.exists(disk_path):
@@ -1464,7 +1427,7 @@ def log_document_action():
         if session.get("logged_in", "no") == "no":
             return "Unauthorized"
         badge = session.get("badge_number")
-        action = request.args.get("action")  # "Viewed" or "Downloaded"
+        action = request.args.get("action")
         filename = request.args.get("filename")
         if not action or not filename:
             return "Missing parameters"
@@ -1526,7 +1489,6 @@ def reset_pin_backup_code():
         conn = sqlite3.connect("AcciTrack.db")
         cursor = conn.cursor()
 
-        # Verify target user profile existence
         cursor.execute("SELECT officer_badge_number FROM AcciTrack_OfficerList WHERE officer_badge_number = ?",
                        (badge,))
         user = cursor.fetchone()
@@ -1534,7 +1496,6 @@ def reset_pin_backup_code():
             conn.close()
             return "Badge number not found"
 
-        # Validate security backup codes
         cursor.execute("SELECT backup_codes FROM AcciTrack_SecuritySettings WHERE badge_number = ?", (badge,))
         row = cursor.fetchone()
         if not row or not row[0]:
@@ -1546,11 +1507,9 @@ def reset_pin_backup_code():
             conn.close()
             return "Invalid backup code"
 
-        # Code matched. Consume (delete) the backup code to enforce one-time use per person
         codes_list.remove(code)
         updated_codes_str = ",".join(codes_list)
 
-        # Update PIN and settings
         cursor.execute("UPDATE AcciTrack_OfficerList SET officer_pin = ? WHERE officer_badge_number = ?",
                        (new_pin, badge))
         cursor.execute("UPDATE AcciTrack_SecuritySettings SET backup_codes = ? WHERE badge_number = ?",
@@ -1559,7 +1518,6 @@ def reset_pin_backup_code():
         conn.commit()
         conn.close()
 
-        # Event Log
         log_security_event(badge, "Backup Code Used",
                            f"Account PIN reset successfully using backup code {code}. This backup code has been consumed.")
 
@@ -1580,7 +1538,6 @@ def accitrack_exit():
     return "Exit"
 
 
-# --- PROFILE PICTURE HANDLERS ---
 @app.route('/upload-profile-picture', methods=["POST"])
 def upload_profile_picture():
     try:
@@ -1610,7 +1567,6 @@ def upload_profile_picture():
         filename = f"avatar_{badge}.{ext}"
         file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
 
-        # Audit Log: Admin Profile Picture Change
         log_security_event(badge, "Profile Picture Changed",
                            f"Admin (Badge: {badge}) directly updated their official profile photo avatar.")
 
@@ -1638,17 +1594,14 @@ def request_profile_picture():
         if ext not in ['png', 'jpg', 'jpeg', 'gif']:
             return "Invalid file type"
 
-        # Save as pending avatar with timestamp to prevent name collisions
         timestamp = int(datetime.datetime.now().timestamp())
         filename = f"pending_avatar_{badge}_{timestamp}.{ext}"
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(file_path)
 
-        # Create a pending profile change request in database
         conn = sqlite3.connect("AcciTrack.db")
         cursor = conn.cursor()
 
-        # Check if there is already a pending ProfilePicture request for this user and clean up its file
         cursor.execute(
             "SELECT requested_data FROM AcciTrack_ProfileChanges WHERE badge_number = ? AND change_type = 'ProfilePicture' AND status = 'pending'",
             (badge,))
@@ -1656,7 +1609,6 @@ def request_profile_picture():
         for old_req in old_requests:
             try:
                 old_data = json.loads(old_req[0])
-                # Extract filename if key is present
                 old_filename = old_data.get("pending_avatar_path").split("/upload/")[-1]
                 old_disk_path = os.path.join(app.config['UPLOAD_FOLDER'], old_filename)
                 if os.path.exists(old_disk_path):
@@ -1668,10 +1620,7 @@ def request_profile_picture():
             "DELETE FROM AcciTrack_ProfileChanges WHERE badge_number = ? AND change_type = 'ProfilePicture' AND status = 'pending'",
             (badge,))
 
-        requested_data = {
-            "pending_avatar_path": f"/upload/{filename}"
-        }
-
+        requested_data = {"pending_avatar_path": f"/upload/{filename}"}
         timestamp_str = datetime.datetime.now().strftime("%b %d %Y • %I:%M %p")
         cursor.execute("""
             INSERT INTO AcciTrack_ProfileChanges (badge_number, change_type, requested_data, timestamp, status)
@@ -1681,7 +1630,6 @@ def request_profile_picture():
         conn.commit()
         conn.close()
 
-        # Audit Log: Client proposes a profile picture change
         log_security_event(badge, "Profile Picture Change Proposed",
                            f"Client/Officer (Badge: {badge}) submitted a proposed profile picture change request for Admin review.")
 
@@ -1729,7 +1677,6 @@ def get_profile_picture():
         return "/static/images/icon.png"
 
 
-# --- SECURITY & ACCESS DATABASE OPERATIONS ---
 def log_security_event(badge_number, event_type, details):
     try:
         conn = sqlite3.connect("AcciTrack.db")
@@ -1755,7 +1702,6 @@ def get_security_settings():
         conn = sqlite3.connect("AcciTrack.db")
         cursor = conn.cursor()
 
-        # Check if the active session matches an Admin account
         cursor.execute("SELECT officer_is_admin FROM AcciTrack_OfficerList WHERE officer_badge_number = ?", (badge,))
         is_admin_row = cursor.fetchone()
         is_admin = is_admin_row[0] == "yes" if is_admin_row else False
@@ -1782,7 +1728,6 @@ def get_security_settings():
             (badge,))
         history = cursor.fetchall()
 
-        # Administrators view global, formatted system-wide audit trails, standard users view only personal logs
         if is_admin:
             cursor.execute("""
                 SELECT s.event_type, 
@@ -1798,14 +1743,12 @@ def get_security_settings():
                 (badge,))
         logs = cursor.fetchall()
 
-        # Dynamic Rule 1: Filter out login/logout notifications if toggled off
         if login_notifications == 'no':
             logs = [
                 log for log in logs
                 if "login" not in log[0].lower() and "logout" not in log[0].lower() and "sign out" not in log[0].lower()
             ]
 
-        # Dynamic Rule 2: Override log rendering when Activity Logs are disabled
         if activity_logs_enabled == 'no':
             timestamp_now = datetime.datetime.now().strftime("%b %d %Y • %I:%M %p")
             logs = [
@@ -1907,12 +1850,10 @@ def get_dashboard_stats():
         incidents_today = 0
         incidents_yesterday = 0
         resolved_today = 0
-
         total_time_diff_minutes = 0
         valid_reviews_count = 0
 
         for r in reports:
-            # 1. Parse submission time
             sub_dt = parse_datetime(r[12]) or parse_datetime(r[2])
 
             if sub_dt:
@@ -1922,7 +1863,6 @@ def get_dashboard_stats():
                 elif sub_date == yesterday_date:
                     incidents_yesterday += 1
 
-            # 2. Resolved Today: count approved reports whose review date is today
             status = r[5]
             review_dt = parse_datetime(r[8])
 
@@ -1930,32 +1870,21 @@ def get_dashboard_stats():
                 if review_dt.date() == today_date:
                     resolved_today += 1
 
-            # 3. Average response time for reports reviewed today
             if review_dt and review_dt.date() == today_date and sub_dt:
                 diff_sec = (review_dt - sub_dt).total_seconds()
-                # Exclude negative or overly large values (> 24 hours)
                 if 0 <= diff_sec <= 86400:
                     total_time_diff_minutes += (diff_sec / 60.0)
                     valid_reviews_count += 1
 
-        # Calculate recent incidents count since yesterday
         recent_incidents = incidents_today + incidents_yesterday
-
-        # Calculate comparison text
         diff = incidents_today - incidents_yesterday
         comparison_text = f"{'+' if diff >= 0 else ''}{diff} from yesterday"
 
-        # Calculate personnel on duty
         personnel_count = len(online_users)
         if personnel_count == 0 and session.get("logged_in") == "yes":
             personnel_count = 1
 
-        # Calculate average response time
-        if valid_reviews_count > 0:
-            avg_time = total_time_diff_minutes / valid_reviews_count
-        else:
-            avg_time = 0.0
-
+        avg_time = (total_time_diff_minutes / valid_reviews_count) if valid_reviews_count > 0 else 0.0
         avg_time_str = f"{avg_time:.1f}m"
 
         return jsonify({
@@ -1976,7 +1905,6 @@ def get_dashboard_stats():
         })
 
 
-# --- PROFILE CHANGE APPROVALS ---
 @app.route('/get-pending-profile-changes', methods=["GET", "POST"])
 def get_pending_profile_changes():
     try:
@@ -2022,7 +1950,7 @@ def review_profile_change():
 
         admin_badge = session.get("badge_number")
         request_id = request.args.get("id") or request.form.get("id")
-        action = request.args.get("action") or request.form.get("action")  # "approve" or "reject"
+        action = request.args.get("action") or request.form.get("action")
 
         if not request_id or not action:
             return "Missing parameters"
@@ -2030,7 +1958,6 @@ def review_profile_change():
         conn = sqlite3.connect("AcciTrack.db")
         cursor = conn.cursor()
 
-        # Fetch requested changes
         cursor.execute("SELECT badge_number, change_type, requested_data FROM AcciTrack_ProfileChanges WHERE id = ?",
                        (request_id,))
         change_row = cursor.fetchone()
@@ -2045,41 +1972,32 @@ def review_profile_change():
             if change_type == "Employment":
                 cursor.execute("""
                     UPDATE AcciTrack_OfficerList
-                    SET officer_employment_job_title = ?,
-                        officer_employment_department = ?,
-                        officer_employment_type = ?,
-                        officer_employment_reporting_officer = ?,
+                    SET officer_employment_job_title = ?, officer_employment_department = ?,
+                        officer_employment_type = ?, officer_employment_reporting_officer = ?,
                         officer_employment_work_location = ?
                     WHERE officer_badge_number = ?
                 """, (requested_data.get("job_title"), requested_data.get("department"), requested_data.get("emp_type"),
                       requested_data.get("supervisor"), requested_data.get("location"), target_badge))
             elif change_type == "EmploymentHistory":
                 cursor.execute("""
-                    UPDATE AcciTrack_OfficerList
-                    SET officer_employment_history = ?
-                    WHERE officer_badge_number = ?
+                    UPDATE AcciTrack_OfficerList SET officer_employment_history = ? WHERE officer_badge_number = ?
                 """, (requested_data.get("history_data"), target_badge))
             elif change_type == "Promotion":
-                # 1. Fetch current roles to archive into history timeline automatically
                 cursor.execute("""
                     SELECT officer_employment_job_title, officer_employment_department, 
                            officer_employment_start_date, officer_employment_history 
-                    FROM AcciTrack_OfficerList 
-                    WHERE officer_badge_number = ?
+                    FROM AcciTrack_OfficerList WHERE officer_badge_number = ?
                 """, (target_badge,))
                 current_row = cursor.fetchone()
 
                 if current_row:
                     cur_job, cur_dept, cur_start, cur_history = current_row
-
-                    # Define timeline boundary metadata
                     old_role = {
                         "role": cur_job or "Police Officer",
                         "dept": cur_dept or "Main Precinct",
                         "tenure": f"{cur_start} - {requested_data.get('start_date')}" if cur_start else f"Ended {requested_data.get('start_date')}"
                     }
 
-                    # Retrieve history list or initialize fresh arrays safely
                     past_roles = []
                     if cur_history:
                         try:
@@ -2089,41 +2007,31 @@ def review_profile_change():
                         except:
                             past_roles = [{"role": cur_history, "dept": "", "tenure": ""}]
 
-                    past_roles.insert(0, old_role)  # Insert previous role on top of history timeline
+                    past_roles.insert(0, old_role)
                     updated_history_str = json.dumps(past_roles)
 
-                    # 2. Promote user to new job roles and save archived history list
                     cursor.execute("""
                         UPDATE AcciTrack_OfficerList
-                        SET officer_employment_job_title = ?,
-                            officer_employment_department = ?,
-                            officer_employment_start_date = ?,
-                            officer_employment_history = ?
+                        SET officer_employment_job_title = ?, officer_employment_department = ?,
+                            officer_employment_start_date = ?, officer_employment_history = ?
                         WHERE officer_badge_number = ?
                     """, (requested_data.get("job_title"), requested_data.get("department"),
                           requested_data.get("start_date"), updated_history_str, target_badge))
             elif change_type == "Personal":
                 cursor.execute("""
                     UPDATE AcciTrack_OfficerList
-                    SET officer_first_name = ?,
-                        officer_middle_name = ?,
-                        officer_last_name = ?,
-                        officer_birthday = ?,
-                        officer_gender = ?,
-                        officer_nationality = ?
+                    SET officer_first_name = ?, officer_middle_name = ?, officer_last_name = ?,
+                        officer_birthday = ?, officer_gender = ?, officer_nationality = ?
                     WHERE officer_badge_number = ?
-                """, (
-                    requested_data.get("first_name"), requested_data.get("middle_name"),
-                    requested_data.get("last_name"),
-                    requested_data.get("birthday"), requested_data.get("gender"), requested_data.get("nationality"),
-                    target_badge))
+                """, (requested_data.get("first_name"), requested_data.get("middle_name"),
+                      requested_data.get("last_name"), requested_data.get("birthday"),
+                      requested_data.get("gender"), requested_data.get("nationality"), target_badge))
             elif change_type == "ProfilePicture":
                 pending_path = requested_data.get("pending_avatar_path")
                 if pending_path:
                     filename = pending_path.split("/upload/")[-1]
                     ext = filename.rsplit('.', 1)[1].lower() if '.' in filename else 'png'
 
-                    # Delete any existing official avatar files for this target badge
                     for existing_ext in ['png', 'jpg', 'jpeg', 'gif']:
                         old_file = os.path.join(app.config['UPLOAD_FOLDER'], f"avatar_{target_badge}.{existing_ext}")
                         if os.path.exists(old_file):
@@ -2138,36 +2046,28 @@ def review_profile_change():
                         try:
                             import shutil
                             shutil.copy(pending_file_path, official_file_path)
-                            os.remove(pending_file_path)  # Clean up the pending file after copy
+                            os.remove(pending_file_path)
                         except Exception as e:
                             print("Error copying avatar:", e)
             else:
                 cursor.execute("""
                     UPDATE AcciTrack_OfficerList
-                    SET officer_primary_email = ?,
-                        officer_secondary_email = ?,
-                        officer_work_phone = ?,
-                        officer_mobile_phone = ?,
-                        officer_primary_contact_name = ?,
-                        officer_primary_contact_phone_number = ?,
-                        officer_primary_contact_relationship = ?,
-                        officer_secondary_contact_name = ?,
-                        officer_secondary_contact_phone_number = ?,
-                        officer_secondary_contact_relationship = ?
+                    SET officer_primary_email = ?, officer_secondary_email = ?,
+                        officer_work_phone = ?, officer_mobile_phone = ?,
+                        officer_primary_contact_name = ?, officer_primary_contact_phone_number = ?,
+                        officer_primary_contact_relationship = ?, officer_secondary_contact_name = ?,
+                        officer_secondary_contact_phone_number = ?, officer_secondary_contact_relationship = ?
                     WHERE officer_badge_number = ?
                 """, (requested_data.get("email"), requested_data.get("sec_email"), requested_data.get("work_phone"),
                       requested_data.get("mobile_phone"), requested_data.get("emerg_name"),
-                      requested_data.get("emerg_phone"),
-                      requested_data.get("emerg_rel"), requested_data.get("emerg_name2"),
-                      requested_data.get("emerg_phone2"),
-                      requested_data.get("emerg_rel2"),
-                      target_badge))
+                      requested_data.get("emerg_phone"), requested_data.get("emerg_rel"),
+                      requested_data.get("emerg_name2"), requested_data.get("emerg_phone2"),
+                      requested_data.get("emerg_rel2"), target_badge))
 
             cursor.execute("UPDATE AcciTrack_ProfileChanges SET status = 'approved' WHERE id = ?", (request_id,))
             conn.commit()
             conn.close()
 
-            # Audit Log: Admin reviews and approves profile change request
             log_security_event(admin_badge, "Profile Change Approved",
                                f"Admin (Badge: {admin_badge}) approved a {change_type} profile change proposed by Badge #{target_badge}")
             return "Success"
@@ -2184,7 +2084,6 @@ def review_profile_change():
                             pass
             cursor.execute("UPDATE AcciTrack_ProfileChanges SET status = 'rejected' WHERE id = ?", (request_id,))
 
-            # Audit Log: Admin reviews and rejects profile change request
             log_security_event(admin_badge, "Profile Change Rejected",
                                f"Admin (Badge: {admin_badge}) rejected a pending {change_type} profile change proposed by Badge #{target_badge}")
 
@@ -2196,7 +2095,6 @@ def review_profile_change():
         return "Fail"
 
 
-# --- ONBOARDING SYSTEM HANDLERS ---
 @app.route('/check-onboarding', methods=["GET", "POST"])
 def check_onboarding():
     if session.get("logged_in", "no") == "no":
@@ -2228,7 +2126,6 @@ def complete_onboarding():
         conn.commit()
         conn.close()
 
-        # Detailed Security Log entry for completing onboarding
         log_security_event(badge, "Onboarding Completed",
                            f"New user Badge #{badge} completed initial onboarding setup and accessed the system.")
         return "Success"
@@ -2237,12 +2134,10 @@ def complete_onboarding():
         return "Fail"
 
 
-# --- SEED SECURITY TABLES ---
 def seed_security_tables():
     try:
         conn = sqlite3.connect("AcciTrack.db")
         cursor = conn.cursor()
-        # Ensure table schemas exist (Set default 2FA status to 'no' for new tables)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS AcciTrack_SecuritySettings (
                 badge_number TEXT PRIMARY KEY,
@@ -2256,41 +2151,27 @@ def seed_security_tables():
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS AcciTrack_AccessHistory (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                badge_number TEXT,
-                device TEXT,
-                location TEXT,
-                timestamp TEXT,
-                is_current TEXT
+                badge_number TEXT, device TEXT, location TEXT, timestamp TEXT, is_current TEXT
             )
         """)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS AcciTrack_SecurityLogs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                badge_number TEXT,
-                event_type TEXT,
-                details TEXT,
-                timestamp TEXT
+                badge_number TEXT, event_type TEXT, details TEXT, timestamp TEXT
             )
         """)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS AcciTrack_Certifications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                badge_number TEXT,
-                cert_name TEXT,
-                issuing_org TEXT,
-                issued_date TEXT,
-                expiry_date TEXT,
-                file_path TEXT
+                badge_number TEXT, cert_name TEXT, issuing_org TEXT,
+                issued_date TEXT, expiry_date TEXT, file_path TEXT
             )
         """)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS AcciTrack_ProfileChanges (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                badge_number TEXT,
-                change_type TEXT,
-                requested_data TEXT,
-                timestamp TEXT,
-                status TEXT DEFAULT 'pending'
+                badge_number TEXT, change_type TEXT, requested_data TEXT,
+                timestamp TEXT, status TEXT DEFAULT 'pending'
             )
         """)
         conn.commit()
@@ -2304,16 +2185,14 @@ def seed_security_tables():
             """, (admin_codes,))
             cursor.execute("""
                 INSERT INTO AcciTrack_AccessHistory (badge_number, device, location, timestamp, is_current)
-                VALUES 
-                ('2', 'Windows PC', 'Headquarters', 'Dec 8, 2024 • 08:00 PM', 'yes'),
-                ('2', 'Windows PC', 'Headquarters', 'Dec 7, 2024 • 11:32 AM', 'no')
+                VALUES ('2', 'Windows PC', 'Headquarters', 'Dec 8, 2024 • 08:00 PM', 'yes'),
+                       ('2', 'Windows PC', 'Headquarters', 'Dec 7, 2024 • 11:32 AM', 'no')
             """)
             cursor.execute("""
                 INSERT INTO AcciTrack_SecurityLogs (badge_number, event_type, details, timestamp)
                 VALUES ('2', 'Successful Login', 'Logged in via Windows PC at Headquarters', 'Dec 8, 2024 • 08:30 AM')
             """)
         else:
-            # Self-healing: Force Admin 2 tfa_enabled to 'no' to prevent users from getting locked out on their first login
             cursor.execute("UPDATE AcciTrack_SecuritySettings SET tfa_enabled = 'no' WHERE badge_number = '2'")
 
         cursor.execute("SELECT 1 FROM AcciTrack_SecuritySettings WHERE badge_number = '1'")
@@ -2325,13 +2204,11 @@ def seed_security_tables():
             """, (officer_codes,))
             cursor.execute("""
                 INSERT INTO AcciTrack_AccessHistory (badge_number, device, location, timestamp, is_current)
-                VALUES 
-                ('1', 'Android Mobile', 'Patrol Zone A', 'Dec 8, 2024 • 07:15 AM', 'yes')
+                VALUES ('1', 'Android Mobile', 'Patrol Zone A', 'Dec 8, 2024 • 07:15 AM', 'yes')
             """)
             cursor.execute("""
                 INSERT INTO AcciTrack_SecurityLogs (badge_number, event_type, details, timestamp)
-                VALUES 
-                ('1', 'Successful Login', 'Logged in via Android Mobile', 'Dec 8, 2024 • 07:15 AM')
+                VALUES ('1', 'Successful Login', 'Logged in via Android Mobile', 'Dec 8, 2024 • 07:15 AM')
             """)
 
         conn.commit()
@@ -2340,94 +2217,60 @@ def seed_security_tables():
         print("Error seeding security tables:", e)
 
 
-# --- DYNAMIC DB SEEDER ---
 def seed_custom_users():
-    """Checks existing entries and safely seeds Admin Mejiro and Officer Manhattan if they do not exist."""
     try:
         existing_officers = db.get_table_values("AcciTrack", "AcciTrack_OfficerList")
-
         existing_badges = [str(officer[9]) for officer in existing_officers]
         existing_usernames = [str(officer[30]) for officer in existing_officers]
 
-        # 1. Officer Manhattan (cafe1030, Badge: 1, Password: Manhattan@2026, is_admin: no)
         if "1" not in existing_badges and "cafe1030" not in existing_usernames:
             officer_data = [
-                {"officer_first_name": "Manhattan"},
-                {"officer_middle_name": ""},
-                {"officer_last_name": "Officer"},
-                {"officer_preferred_name": "Manhattan"},
-                {"officer_birthday": "01/01/1995"},
-                {"officer_gender": "Male"},
-                {"officer_nationality": "Philippines"},
-                {"officer_blood_type": "O+"},
-                {"officer_employee_id": "EMP-2026-001"},
-                {"officer_badge_number": "1"},
-                {"officer_social_security_number": "N/A"},
-                {"officer_primary_email": "manhattan@accitrack.com"},
-                {"officer_secondary_email": ""},
-                {"officer_work_phone": "+63 2 8123 4567"},
-                {"officer_mobile_phone": "+63 915 123 4567"},
-                {"officer_primary_contact_name": "Emergency Contact"},
-                {"officer_primary_contact_phone_number": ""},
-                {"officer_primary_contact_relationship": "Family"},
-                {"officer_secondary_contact_name": ""},
-                {"officer_secondary_contact_phone_number": ""},
-                {"officer_secondary_contact_relationship": ""},
-                {"officer_employment_job_title": "Police Officer"},
-                {"officer_employment_department": "Patrol"},
-                {"officer_employment_type": "Full Time"},
+                {"officer_first_name": "Manhattan"}, {"officer_middle_name": ""},
+                {"officer_last_name": "Officer"}, {"officer_preferred_name": "Manhattan"},
+                {"officer_birthday": "01/01/1995"}, {"officer_gender": "Male"},
+                {"officer_nationality": "Philippines"}, {"officer_blood_type": "O+"},
+                {"officer_employee_id": "EMP-2026-001"}, {"officer_badge_number": "1"},
+                {"officer_social_security_number": "N/A"}, {"officer_primary_email": "manhattan@accitrack.com"},
+                {"officer_secondary_email": ""}, {"officer_work_phone": "+63 2 8123 4567"},
+                {"officer_mobile_phone": "+63 915 123 4567"}, {"officer_primary_contact_name": "Emergency Contact"},
+                {"officer_primary_contact_phone_number": ""}, {"officer_primary_contact_relationship": "Family"},
+                {"officer_secondary_contact_name": ""}, {"officer_secondary_contact_phone_number": ""},
+                {"officer_secondary_contact_relationship": ""}, {"officer_employment_job_title": "Police Officer"},
+                {"officer_employment_department": "Patrol"}, {"officer_employment_type": "Full Time"},
                 {"officer_employment_start_date": "01/15/2020"},
                 {"officer_employment_reporting_officer": "Chief Police Officer"},
-                {"officer_employment_work_location": "Main Precinct HQ"},
-                {"officer_employment_history": ""},
-                {"officer_document_list": ""},
-                {"officer_pin": "Manhattan@2026"},  # Seeded with complex password
-                {"officer_username": "cafe1030"},
-                {"officer_is_admin": "no"}
+                {"officer_employment_work_location": "Main Precinct HQ"}, {"officer_employment_history": ""},
+                {"officer_document_list": ""}, {"officer_pin": "Manhattan@2026"},
+                {"officer_username": "cafe1030"}, {"officer_is_admin": "no"}
             ]
             db.insert_to_table("AcciTrack", "AcciTrack_OfficerList", officer_data)
             print("[AcciTrack] Seeded Officer Manhattan (cafe1030)")
 
-        # 2. Admin Mejiro (oogabooga, Badge: 2, Password: McQueen#2026, is_admin: yes)
         if "2" not in existing_badges and "oogabooga" not in existing_usernames:
             admin_data = [
-                {"officer_first_name": "Mejiro"},
-                {"officer_middle_name": "Goldship"},
-                {"officer_last_name": "McQueen"},
-                {"officer_preferred_name": "Mejiro"},
-                {"officer_birthday": "04/03/1987"},
-                {"officer_gender": "Female"},
-                {"officer_nationality": "Japan"},
-                {"officer_blood_type": "O+"},
-                {"officer_employee_id": "EMP-2020-135"},
-                {"officer_badge_number": "2"},
-                {"officer_social_security_number": "N/A"},
-                {"officer_primary_email": "mejiromc125@gmail.com"},  # Updated default seeded email address
-                {"officer_secondary_email": ""},
-                {"officer_work_phone": "+63 2 8123 4567"},
-                {"officer_mobile_phone": "+63 (915) 870-2185"},
-                {"officer_primary_contact_name": "Tokai Teio"},
+                {"officer_first_name": "Mejiro"}, {"officer_middle_name": "Goldship"},
+                {"officer_last_name": "McQueen"}, {"officer_preferred_name": "Mejiro"},
+                {"officer_birthday": "04/03/1987"}, {"officer_gender": "Female"},
+                {"officer_nationality": "Japan"}, {"officer_blood_type": "O+"},
+                {"officer_employee_id": "EMP-2020-135"}, {"officer_badge_number": "2"},
+                {"officer_social_security_number": "N/A"}, {"officer_primary_email": "mejiromc125@gmail.com"},
+                {"officer_secondary_email": ""}, {"officer_work_phone": "+63 2 8123 4567"},
+                {"officer_mobile_phone": "+63 (915) 870-2185"}, {"officer_primary_contact_name": "Tokai Teio"},
                 {"officer_primary_contact_phone_number": "+63 (905) 421-8900"},
-                {"officer_primary_contact_relationship": "Spouse"},
-                {"officer_secondary_contact_name": ""},
-                {"officer_secondary_contact_phone_number": ""},
-                {"officer_secondary_contact_relationship": ""},
+                {"officer_primary_contact_relationship": "Spouse"}, {"officer_secondary_contact_name": ""},
+                {"officer_secondary_contact_phone_number": ""}, {"officer_secondary_contact_relationship": ""},
                 {"officer_employment_job_title": "Chief Administrator"},
                 {"officer_employment_department": "Administrative Operations"},
-                {"officer_employment_type": "Full Time"},
-                {"officer_employment_start_date": "06/18/2013"},
+                {"officer_employment_type": "Full Time"}, {"officer_employment_start_date": "06/18/2013"},
                 {"officer_employment_reporting_officer": "Police Commissioner"},
                 {"officer_employment_work_location": "Headquarters – 4th Floor"},
                 {"officer_employment_history": "Operation (Mon-Sat, 07:00–18:00)"},
-                {"officer_document_list": ""},
-                {"officer_pin": "McQueen#2026"},  # Seeded with complex password
-                {"officer_username": "oogabooga"},
-                {"officer_is_admin": "yes"}
+                {"officer_document_list": ""}, {"officer_pin": "McQueen#2026"},
+                {"officer_username": "oogabooga"}, {"officer_is_admin": "yes"}
             ]
             db.insert_to_table("AcciTrack", "AcciTrack_OfficerList", admin_data)
             print("[AcciTrack] Seeded Admin Mejiro (oogabooga)")
         else:
-            # Self-healing migration to update any existing Mejiro email address in SQLite
             conn = sqlite3.connect("AcciTrack.db")
             cursor = conn.cursor()
             cursor.execute("""
@@ -2451,4 +2294,5 @@ if "__main__" == __name__:
     seed_custom_users()
     seed_security_tables()
 
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=False)
