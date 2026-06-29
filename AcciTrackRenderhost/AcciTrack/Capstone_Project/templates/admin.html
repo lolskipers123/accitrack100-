@@ -7,6 +7,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"/>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}?v=1.8"/>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/mobile.css') }}">
     <style>
         /* Parity layout styling for breakdown metrics and status filter chips */
         .accident-breakdown-row {
@@ -92,6 +93,20 @@
     </style>
 </head>
 <body>
+<!-- Mobile Top Bar (hidden on desktop via CSS) -->
+<div class="mobile-topbar">
+    <button class="hamburger" onclick="document.body.classList.toggle('mobile-menu-open')" aria-label="Menu">&#9776;</button>
+    <span class="topbar-title">AcciTrack Admin</span>
+</div>
+<!-- Overlay click to close sidebar -->
+<script>
+  document.addEventListener('click', function(e){
+    if(document.body.classList.contains('mobile-menu-open') && !e.target.closest('.sidebar') && !e.target.closest('.hamburger')){
+      document.body.classList.remove('mobile-menu-open');
+    }
+  });
+</script>
+
     <aside class="sidebar">
         <div class="logo">
             <img src="{{ url_for('static', filename='images/Logo.png') }}" alt="AcciTrack Logo" class="logo-img"/>
