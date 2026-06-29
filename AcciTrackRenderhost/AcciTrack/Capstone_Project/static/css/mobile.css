@@ -1,0 +1,423 @@
+/*
+ * AcciTrack — Mobile / Android Responsive Stylesheet
+ * Appended after login.css / admin.css / client.css
+ * Targets: phones (≤480px), small tablets (≤768px), large tablets (≤1024px)
+ */
+
+/* ============================================================
+   GLOBAL — applies to all pages
+   ============================================================ */
+@media (max-width: 768px) {
+    /* Prevent horizontal scroll everywhere */
+    html, body {
+        overflow-x: hidden;
+        -webkit-text-size-adjust: 100%;
+    }
+
+    /* Larger tap targets for all buttons */
+    button, .btn, .btn-primary, input[type="submit"] {
+        min-height: 48px;
+        font-size: 16px !important; /* prevents iOS zoom on focus */
+        touch-action: manipulation;
+    }
+
+    /* Prevent iOS font size zoom on inputs */
+    input, select, textarea {
+        font-size: 16px !important;
+        touch-action: manipulation;
+    }
+}
+
+/* ============================================================
+   LOGIN PAGE
+   ============================================================ */
+@media (max-width: 600px) {
+    .card {
+        padding: 32px 20px !important;
+        border-radius: 20px !important;
+        margin: 0 8px;
+    }
+
+    .logo {
+        width: 90px !important;
+        height: 90px !important;
+        margin-bottom: 18px !important;
+    }
+
+    h1 {
+        font-size: 30px !important;
+    }
+
+    .sub {
+        font-size: 13px !important;
+        margin-bottom: 24px !important;
+    }
+
+    /* Role cards stack on mobile */
+    .roles {
+        flex-direction: column !important;
+        gap: 12px !important;
+    }
+
+    .role {
+        padding: 14px !important;
+    }
+
+    .role img {
+        width: 56px !important;
+        height: 56px !important;
+    }
+
+    .role h3 {
+        font-size: 15px !important;
+    }
+
+    /* Inputs */
+    .in input {
+        padding: 14px 14px 14px 48px !important;
+    }
+
+    .btn {
+        padding: 14px !important;
+        font-size: 16px !important;
+        margin-top: 10px !important;
+    }
+
+    /* Clock widget — hide or shrink on small screens */
+    .clock {
+        top: 10px !important;
+        left: 10px !important;
+        padding: 6px 14px !important;
+        font-size: 12px !important;
+    }
+
+    /* Forgot modal */
+    .modal {
+        width: 95% !important;
+        max-width: 95% !important;
+        border-radius: 16px !important;
+    }
+
+    .modal-body {
+        padding: 16px !important;
+    }
+
+    .modal-body input {
+        padding: 12px 14px !important;
+        font-size: 16px !important;
+    }
+
+    .modal-body button {
+        padding: 14px !important;
+        font-size: 15px !important;
+        min-height: 48px;
+    }
+
+    /* Recovery tab buttons */
+    #tabBackup, #tabEmail {
+        padding: 12px 6px !important;
+        font-size: 13px !important;
+    }
+}
+
+/* ============================================================
+   ADMIN & CLIENT — SIDEBAR → BOTTOM NAV on mobile
+   ============================================================ */
+@media (max-width: 768px) {
+    /* Hide sidebar */
+    .sidebar {
+        display: none !important;
+    }
+
+    /* Remove sidebar margin from main content */
+    .main,
+    body > .main,
+    div.main {
+        margin-left: 0 !important;
+        padding: 16px 14px 80px 14px !important; /* bottom padding for bottom nav */
+        width: 100% !important;
+    }
+
+    /* Inject bottom navigation bar via CSS trick using sidebar links */
+    /* We show a fixed bottom bar instead */
+    .sidebar-bottom-nav {
+        display: flex !important;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 64px;
+        background: #0b2c66;
+        z-index: 200;
+        justify-content: space-around;
+        align-items: center;
+        box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
+        border-top: 1px solid rgba(255,255,255,0.1);
+    }
+}
+
+/* Mobile hamburger menu toggle (add class .mobile-menu-open to body) */
+@media (max-width: 768px) {
+    body.mobile-menu-open .sidebar {
+        display: flex !important;
+        flex-direction: column;
+        position: fixed;
+        top: 0; left: 0; bottom: 0;
+        width: 80vw;
+        max-width: 300px;
+        z-index: 999;
+        transform: translateX(0);
+        box-shadow: 4px 0 30px rgba(0,0,0,0.5);
+    }
+
+    /* Overlay behind open sidebar */
+    body.mobile-menu-open::after {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.5);
+        z-index: 998;
+    }
+
+    /* Mobile top header bar */
+    .mobile-topbar {
+        display: flex !important;
+        position: fixed;
+        top: 0; left: 0; right: 0;
+        height: 56px;
+        background: #0b2c66;
+        color: white;
+        align-items: center;
+        padding: 0 16px;
+        z-index: 100;
+        gap: 14px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    }
+
+    .mobile-topbar .hamburger {
+        font-size: 22px;
+        cursor: pointer;
+        color: white;
+        background: none;
+        border: none;
+        padding: 8px;
+        min-height: unset;
+        line-height: 1;
+    }
+
+    .mobile-topbar .topbar-title {
+        font-size: 17px;
+        font-weight: 700;
+        color: white;
+        flex: 1;
+    }
+
+    /* Push main content below topbar */
+    .main,
+    body > .main,
+    div.main {
+        padding-top: 72px !important;
+    }
+}
+
+/* Hide mobile-topbar by default on desktop */
+.mobile-topbar {
+    display: none;
+}
+
+/* ============================================================
+   ADMIN & CLIENT — CARDS, GRIDS, TABLES
+   ============================================================ */
+@media (max-width: 768px) {
+
+    /* Page header */
+    .top-header {
+        flex-direction: column !important;
+        gap: 12px !important;
+        margin-bottom: 20px !important;
+    }
+
+    .header-left h2 {
+        font-size: 22px !important;
+    }
+
+    /* Stat / KPI cards grid → single column */
+    .stats-grid,
+    .kpi-grid,
+    [class*="stats-grid"],
+    [class*="kpi-grid"] {
+        grid-template-columns: 1fr 1fr !important;
+        gap: 12px !important;
+    }
+
+    /* Content grid panels → single column */
+    .content-grid,
+    [class*="content-grid"] {
+        grid-template-columns: 1fr !important;
+        gap: 16px !important;
+    }
+
+    /* Panel padding */
+    .panel,
+    [class*="panel"] {
+        padding: 16px !important;
+        border-radius: 14px !important;
+    }
+
+    /* Tables — horizontal scroll */
+    .table-wrapper,
+    table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        white-space: nowrap;
+        width: 100%;
+    }
+
+    table th, table td {
+        padding: 10px 12px !important;
+        font-size: 13px !important;
+    }
+
+    /* Report / incident items */
+    .report-item-final,
+    [class*="report-item"] {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+        gap: 12px !important;
+        padding: 16px !important;
+    }
+
+    .report-badges-final,
+    [class*="report-badges"] {
+        flex-wrap: wrap !important;
+        gap: 6px !important;
+    }
+
+    /* Quick action grid → 2 columns */
+    .quick-actions-grid,
+    [class*="quick-actions-grid"] {
+        grid-template-columns: 1fr 1fr !important;
+        gap: 10px !important;
+    }
+
+    /* Template cards → single column */
+    .templates-grid,
+    [class*="templates-grid"] {
+        grid-template-columns: 1fr !important;
+        gap: 10px !important;
+    }
+
+    /* Video card */
+    .video-card video,
+    video {
+        height: 220px !important;
+        width: 100% !important;
+        object-fit: cover;
+    }
+
+    /* Incident details grid */
+    .details-grid,
+    [class*="details-grid"] {
+        grid-template-columns: 1fr !important;
+    }
+
+    /* Modal dialogs */
+    .modal,
+    [class*="-modal"],
+    [class*="modal-"] {
+        width: 95vw !important;
+        max-width: 95vw !important;
+        max-height: 90vh;
+        overflow-y: auto;
+        border-radius: 16px !important;
+    }
+
+    /* Form inputs in modals/panels */
+    .form-group input,
+    .form-group select,
+    .form-group textarea,
+    .input-field,
+    input[type="text"],
+    input[type="email"],
+    input[type="password"],
+    input[type="number"],
+    select,
+    textarea {
+        padding: 13px 14px !important;
+        font-size: 16px !important;
+        border-radius: 10px !important;
+    }
+
+    /* Action buttons row → wrap */
+    .action-buttons,
+    [class*="action-btn"],
+    .btn-group {
+        flex-wrap: wrap !important;
+        gap: 8px !important;
+    }
+
+    /* Search / filter bar */
+    .search-bar,
+    [class*="search-bar"],
+    [class*="filter-bar"] {
+        flex-direction: column !important;
+        gap: 10px !important;
+    }
+
+    .search-bar input,
+    [class*="search-bar"] input {
+        width: 100% !important;
+    }
+
+    /* Avatar / profile images */
+    .avatar,
+    [class*="avatar"] {
+        width: 40px !important;
+        height: 40px !important;
+    }
+}
+
+/* Very small phones */
+@media (max-width: 380px) {
+    .stats-grid,
+    [class*="stats-grid"],
+    [class*="kpi-grid"] {
+        grid-template-columns: 1fr !important;
+    }
+
+    .quick-actions-grid,
+    [class*="quick-actions-grid"] {
+        grid-template-columns: 1fr !important;
+    }
+
+    .header-left h2 {
+        font-size: 18px !important;
+    }
+}
+
+/* ============================================================
+   TOUCH IMPROVEMENTS
+   ============================================================ */
+@media (hover: none) and (pointer: coarse) {
+    /* Remove hover transforms that feel broken on touch */
+    .role:hover,
+    .btn:hover,
+    .report-item-final:hover,
+    [class*="template-card"]:hover,
+    [class*="action-card"]:hover {
+        transform: none !important;
+    }
+
+    /* Bigger touch targets for nav links */
+    .sidebar nav a {
+        padding: 16px !important;
+    }
+
+    /* Active state feedback instead */
+    .btn:active,
+    button:active {
+        opacity: 0.8;
+        transform: scale(0.98) !important;
+    }
+}
